@@ -1,0 +1,323 @@
+{% extends 'base.html' %}
+{% block extra_head %}
+<style>
+  .filters { padding: 16px; margin-bottom: 22px; }
+  .split-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 22px; }
+  .side-panel { padding: 18px; border-radius: 22px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+  .side-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 16px; font-size:20px; font-weight:900; }
+  .side-title span { font-size: 12px; color: var(--muted); font-weight:800; }
+  .mini-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .class-card-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .class-card-group { padding: 16px; border-radius: 22px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+  .class-card-group h3 { margin: 0 0 12px; font-size: 16px; font-weight: 900; }
+  .chart-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:12px; }
+  .side-filter { margin: 0 0 14px; padding: 12px; border-radius: 16px; border: 1px solid var(--line); background: rgba(15,23,42,.55); }
+  .chart-head .chart-title { margin:0; }
+  .inline-filter { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; }
+  .inline-filter .field { min-width: 220px; }
+  .inline-filter button { height: 38px; padding: 0 18px; }
+  .kpi-card { border: 1px solid var(--line); border-radius: 18px; padding: 14px; background: linear-gradient(180deg, rgba(31,41,55,.95), rgba(15,23,42,.95)); display: flex; align-items: center; gap: 12px; min-height: 92px; }
+  .kpi-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 15px; background: rgba(56,189,248,.14); border: 1px solid rgba(56,189,248,.22); font-size: 23px; flex: 0 0 46px; }
+  .kpi-label { color: var(--muted); font-weight: 800; font-size: 12px; margin-bottom: 5px; }
+  .kpi-value { font-size: 24px; font-weight: 900; line-height: 1; margin-bottom: 5px; }
+  .kpi-hint { color: #cbd5e1; font-weight: 700; font-size: 11px; }
+  .chart-card { padding: 18px; border-radius: 22px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); margin-bottom: 22px; }
+  .chart-title { margin: 0 0 12px; font-size: 18px; font-weight: 900; }
+  .chart-box { position: relative; height: 330px; width: 100%; overflow: hidden; }
+  .chart-box.tall { height: 390px; }
+  .chart-box canvas { display: block; width: 100% !important; height: 100% !important; }
+  .table-panel { padding: 18px; margin-bottom: 22px; }
+  .insight { margin-bottom: 22px; padding: 16px; border-radius: 18px; background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.18); color: #dbeafe; line-height: 1.5; }
+  .insight strong { color: white; }
+  .hour-filter-panel { padding: 16px; margin-bottom: 16px; }
+  .muted-note { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+  @media (max-width: 1300px) {
+    .split-grid { grid-template-columns: 1fr; }
+    .class-card-grid { grid-template-columns: 1fr; }
+    .class-card-group { grid-column: span 1 !important; }
+  }
+  @media (max-width: 760px) {
+    .mini-cards { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div class="title">
+    <h1>Dashboard de Tabulação</h1>
+    <p>Visão separada entre Locator e Receptivo, com volume, TMA e comportamento por classificação.</p>
+  </div>
+  <div class="badge">Planilha2 + Flask</div>
+</div>
+
+{% if error %}
+  <div class="error">{{ error }}</div>
+{% endif %}
+
+<section class="panel filters">
+  <form method="get" class="field-grid">
+    <div class="field">
+      <label>Data</label>
+      <select name="date">
+        <option value="Todos" {% if selected_date == 'Todos' %}selected{% endif %}>Todas</option>
+        {% for d in dates %}
+          <option value="{{ d }}" {% if d == selected_date %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" name="locator_class" value="{{ selected_locator_class }}">
+    <input type="hidden" name="receptivo_class" value="{{ selected_receptivo_class }}">
+    <input type="hidden" name="classificacao" value="{{ selected_class }}">
+    <div class="field">
+      <button type="submit">Aplicar filtros</button>
+    </div>
+  </form>
+</section>
+
+{% if summary %}
+  <div class="insight">
+    <strong>Insight:</strong> use esta aba para comparar comportamento do <strong>Locator</strong> e esforço do <strong>Receptivo</strong>. Volume mostra onde a operação concentra chamadas; TMA mostra onde o tempo está sendo consumido. O gráfico por hora usa o volume horário da base e pondera pelo TMA de cada tabulação.
+  </div>
+  <div class="class-card-grid">
+    <section class="class-card-group" style="grid-column: span 2;">
+      <h3>Cards Locator</h3>
+      <div class="mini-cards">
+        {% for card in summary.locator_class_cards %}
+          <div class="kpi-card">
+            <div class="kpi-icon">{{ card.icon }}</div>
+            <div>
+              <div class="kpi-label">{{ card.label }}</div>
+              <div class="kpi-value">{{ card.value }}</div>
+              <div class="kpi-hint">{{ card.hint }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="class-card-group" style="grid-column: span 3;">
+      <h3>Cards Receptivo</h3>
+      <div class="mini-cards" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+        {% for card in summary.receptivo_class_cards %}
+          <div class="kpi-card">
+            <div class="kpi-icon">{{ card.icon }}</div>
+            <div>
+              <div class="kpi-label">{{ card.label }}</div>
+              <div class="kpi-value">{{ card.value }}</div>
+              <div class="kpi-hint">{{ card.hint }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+
+  <div class="split-grid">
+    <section class="side-panel">
+      <h2 class="side-title">Locator <span>IA / Localizador</span></h2>
+      <form method="get" class="side-filter">
+        <input type="hidden" name="date" value="{{ selected_date }}">
+        <input type="hidden" name="classificacao" value="{{ selected_class }}">
+        <input type="hidden" name="receptivo_class" value="{{ selected_receptivo_class }}">
+        <div class="field" style="min-width:100%;">
+          <label>Classificação do Locator</label>
+          <select name="locator_class" onchange="this.form.submit()">
+            <option value="Todos" {% if selected_locator_class == 'Todos' %}selected{% endif %}>Todas</option>
+            {% for cls in locator_class_options %}
+              <option value="{{ cls }}" {% if cls == selected_locator_class %}selected{% endif %}>{{ cls }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
+      <div class="mini-cards">
+        {% for card in summary.locator_cards %}
+          <div class="kpi-card">
+            <div class="kpi-icon">{{ card.icon }}</div>
+            <div>
+              <div class="kpi-label">{{ card.label }}</div>
+              <div class="kpi-value">{{ card.value }}</div>
+              <div class="kpi-hint">{{ card.hint }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      <h3 class="chart-title">Volume por tabulação</h3>
+      <div class="chart-box"><canvas id="chartLocatorVolume"></canvas></div>
+      <h3 class="chart-title" style="margin-top:18px;">TMA por tabulação</h3>
+      <div class="chart-box"><canvas id="chartLocatorTma"></canvas></div>
+    </section>
+
+    <section class="side-panel">
+      <h2 class="side-title">Receptivo <span>Humano / Operação</span></h2>
+      <form method="get" class="side-filter">
+        <input type="hidden" name="date" value="{{ selected_date }}">
+        <input type="hidden" name="classificacao" value="{{ selected_class }}">
+        <input type="hidden" name="locator_class" value="{{ selected_locator_class }}">
+        <div class="field" style="min-width:100%;">
+          <label>Classificação do Receptivo</label>
+          <select name="receptivo_class" onchange="this.form.submit()">
+            <option value="Todos" {% if selected_receptivo_class == 'Todos' %}selected{% endif %}>Todas</option>
+            {% for cls in receptivo_class_options %}
+              <option value="{{ cls }}" {% if cls == selected_receptivo_class %}selected{% endif %}>{{ cls }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
+      <div class="mini-cards">
+        {% for card in summary.receptivo_cards %}
+          <div class="kpi-card">
+            <div class="kpi-icon">{{ card.icon }}</div>
+            <div>
+              <div class="kpi-label">{{ card.label }}</div>
+              <div class="kpi-value">{{ card.value }}</div>
+              <div class="kpi-hint">{{ card.hint }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      <h3 class="chart-title">Volume por tabulação</h3>
+      <div class="chart-box"><canvas id="chartReceptivoVolume"></canvas></div>
+      <h3 class="chart-title" style="margin-top:18px;">TMA por tabulação</h3>
+      <div class="chart-box"><canvas id="chartReceptivoTma"></canvas></div>
+    </section>
+  </div>
+
+  <section class="chart-card">
+    <form method="get" class="chart-head">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <input type="hidden" name="locator_class" value="{{ selected_locator_class }}">
+      <input type="hidden" name="receptivo_class" value="{{ selected_receptivo_class }}">
+      <div>
+        <h2 class="chart-title">TMA por hora · Locator x Receptivo</h2>
+        <p class="muted-note">Filtro aplicado: <strong>{{ selected_class }}</strong></p>
+      </div>
+      <div class="inline-filter">
+        <div class="field">
+          <label>Classificação para TMA por hora</label>
+          <select name="classificacao">
+            <option value="Todos" {% if selected_class == 'Todos' %}selected{% endif %}>Todas</option>
+            {% for cls in class_options %}
+              <option value="{{ cls }}" {% if cls == selected_class %}selected{% endif %}>{{ cls }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit">Aplicar</button>
+      </div>
+    </form>
+    <div class="chart-box tall"><canvas id="chartHourlyTma"></canvas></div>
+  </section>
+
+
+
+  <section class="panel table-panel">
+    <h2 class="section-title">Ranking de tabulações</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Tabulação</th>
+            <th>Classificação</th>
+            <th>Quantidade</th>
+            <th>TMA</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.ranking_rows %}
+            <tr>
+              <td>{{ row.Tipo }}</td>
+              <td>{{ row.Tabulacao }}</td>
+              <td>{{ row.Classificacao }}</td>
+              <td>{{ row.Quantidade }}</td>
+              <td>{{ row.TMA }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% else %}
+  <div class="error">Nenhum dado encontrado para os filtros selecionados.</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if summary %}
+<script>
+  Chart.register(ChartDataLabels);
+  const locator = {{ summary.locator|tojson }};
+  const receptivo = {{ summary.receptivo|tojson }};
+  const hourly = {{ summary.hourly_tma|tojson }};
+
+  function segundosParaTempo(v) {
+    const total = Math.round(Number(v) || 0);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+
+  function baseOptions(horizontal=false, isTime=false) {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: horizontal ? 'y' : 'x',
+      plugins: {
+        legend: { labels: { color: '#cbd5e1', font: { weight: '700' } } },
+        datalabels: {
+          color: '#e5e7eb',
+          anchor: horizontal ? 'end' : 'end',
+          align: horizontal ? 'right' : 'top',
+          offset: 4,
+          clamp: true,
+          font: { weight: '800', size: 10 },
+          formatter: function(value) {
+            return isTime ? segundosParaTempo(value) : Number(value || 0).toLocaleString('pt-BR');
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const value = ctx.raw;
+              return isTime ? `${ctx.dataset.label}: ${segundosParaTempo(value)}` : `${ctx.dataset.label}: ${Number(value).toLocaleString('pt-BR')}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#cbd5e1' }, grid: { color: 'rgba(148,163,184,.12)' } },
+        y: { ticks: { color: '#cbd5e1' }, grid: { color: 'rgba(148,163,184,.12)' } }
+      }
+    };
+  }
+
+  function makeBarChart(id, labels, data, label, horizontal=false, isTime=false) {
+    new Chart(document.getElementById(id), {
+      type: 'bar',
+      data: { labels, datasets: [{ label, data, borderWidth: 2, borderRadius: 8 }] },
+      options: baseOptions(horizontal, isTime)
+    });
+  }
+
+  makeBarChart('chartLocatorVolume', locator.labels, locator.volume, 'Volume Locator', true, false);
+  makeBarChart('chartReceptivoVolume', receptivo.labels, receptivo.volume, 'Volume Receptivo', true, false);
+  makeBarChart('chartLocatorTma', locator.labels, locator.tma, 'TMA Locator', true, true);
+  makeBarChart('chartReceptivoTma', receptivo.labels, receptivo.tma, 'TMA Receptivo', true, true);
+
+  new Chart(document.getElementById('chartHourlyTma'), {
+    type: 'line',
+    data: {
+      labels: hourly.labels,
+      datasets: [
+        { label: 'TMA Locator', data: hourly.locator, borderWidth: 3, tension: .35, pointRadius: 4 },
+        { label: 'TMA Receptivo', data: hourly.receptivo, borderWidth: 3, tension: .35, pointRadius: 4 }
+      ]
+    },
+    options: baseOptions(false, true)
+  });
+
+</script>
+{% endif %}
+{% endblock %}

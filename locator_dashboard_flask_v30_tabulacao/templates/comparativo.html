@@ -1,0 +1,251 @@
+{% extends 'base.html' %}
+{% block extra_head %}
+<style>
+  .filters { padding: 18px; margin-bottom: 22px; }
+  .compare-layout { display: grid; grid-template-columns: 320px 1fr; gap: 18px; }
+  .sticky-panel { position: sticky; top: 24px; align-self: start; }
+  .compare-board { display: grid; gap: 14px; }
+  .board-head {
+    display: grid;
+    grid-template-columns: 1.15fr 1.15fr .7fr .7fr;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .board-head .hcell {
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 12px 14px;
+    background: rgba(17,24,39,.7);
+    font-size: 13px;
+    font-weight: 800;
+    color: #cbd5e1;
+    text-align: center;
+  }
+  .board-head .hcell .sub { display:block; margin-top: 4px; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .metric-row {
+    display: grid;
+    grid-template-columns: 1.15fr 1.15fr .7fr .7fr;
+    gap: 12px;
+    align-items: stretch;
+  }
+  .metric-card {
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 12px;
+    align-items: center;
+    background: linear-gradient(180deg, rgba(31,41,55,.95), rgba(15,23,42,.95));
+    min-height: 88px;
+  }
+  .metric-card .ico {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    background: rgba(56,189,248,.14);
+    border: 1px solid rgba(56,189,248,.22);
+    font-size: 22px;
+  }
+  .metric-card .meta { min-width: 0; }
+  .metric-card .label {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 800;
+    margin-bottom: 4px;
+    line-height: 1.2;
+  }
+  .metric-card .value {
+    font-size: 17px;
+    font-weight: 900;
+    margin-bottom: 3px;
+    line-height: 1.1;
+  }
+  .metric-card .hint {
+    font-size: 11px;
+    color: #cbd5e1;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .delta-card {
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 12px 14px;
+    background: linear-gradient(180deg, rgba(17,24,39,.98), rgba(15,23,42,.95));
+    display: grid;
+    align-content: center;
+    min-height: 88px;
+  }
+  .delta-card .k {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .delta-card .v {
+    font-size: 24px;
+    font-weight: 900;
+    line-height: 1.05;
+  }
+  .legend-mini {
+    display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; color:var(--muted); font-size:12px;
+  }
+  .legend-mini span { display:flex; align-items:center; gap:6px; }
+  .legend-mini b { color:#e5e7eb; }
+  .insight { margin-top: 18px; padding: 16px; border-radius: 18px; background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.18); color: #dbeafe; }
+  .insight.compact { margin-top: 16px; font-size: 14px; line-height: 1.45; }
+  .insight ul { margin: 10px 0 10px 0; padding-left: 0; list-style: none; display: grid; gap: 6px; }
+  .insight li { font-weight: 800; color: #e0f2fe; }
+  .insight p { margin: 8px 0; }
+  .hour-filter { min-width: 100%; }
+  .hour-range { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
+  .hour-range span { color: var(--muted); font-size: 12px; font-weight: 800; text-align: center; }
+  .hour-range select { min-width: 0; }
+  @media (max-width: 1320px) {
+    .board-head, .metric-row { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 1200px) {
+    .compare-layout { grid-template-columns: 1fr; }
+    .sticky-panel { position: static; }
+  }
+  @media (max-width: 860px) {
+    .board-head, .metric-row { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="hero">
+  <div class="title">
+    <h1>Dashboard comparativo</h1>
+    <p>Compare campanhas usando a mesma base, mesmo quando a campanha ativa não tiver todas as colunas populadas.</p>
+  </div>
+  <div class="badge">Comparativo</div>
+</div>
+
+<div class="compare-layout">
+  <aside class="panel card sticky-panel">
+    <h2 class="section-title">Filtros do comparativo</h2>
+    <form method="get" class="field-grid">
+      <div class="field">
+        <label>Campanha A</label>
+        <select name="campaign_a">
+          {% for campaign in campaigns %}
+            <option value="{{ campaign }}" {% if campaign_a == campaign %}selected{% endif %}>{{ campaign }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Campanha B</label>
+        <select name="campaign_b">
+          {% for campaign in campaigns %}
+            <option value="{{ campaign }}" {% if campaign_b == campaign %}selected{% endif %}>{{ campaign }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Data inicial</label>
+        <input type="date" name="start_date" value="{{ start_date }}" />
+      </div>
+      <div class="field">
+        <label>Data final</label>
+        <input type="date" name="end_date" value="{{ end_date }}" />
+      </div>
+      <div class="field hour-filter">
+        <label>Horário</label>
+        <div class="hour-range">
+          <select name="start_hour">
+            <option value="" {% if start_hour == '' %}selected{% endif %}>Início: todos</option>
+            {% for hour in hour_options %}
+              <option value="{{ hour }}" {% if start_hour|string == hour|string %}selected{% endif %}>{{ '%02d:00'|format(hour) }}</option>
+            {% endfor %}
+          </select>
+          <span>até</span>
+          <select name="end_hour">
+            <option value="" {% if end_hour == '' %}selected{% endif %}>Fim: todos</option>
+            {% for hour in hour_options %}
+              <option value="{{ hour }}" {% if end_hour|string == hour|string %}selected{% endif %}>{{ '%02d:00'|format(hour) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <button type="submit">Comparar campanhas</button>
+      </div>
+    </form>
+    <div class="insight compact">
+      <strong>Insight estratégico:</strong>
+      <p>O <strong>Locator_Via_Varejo</strong> entrega muito mais eficiência mesmo com menor volume:</p>
+      <ul>
+        <li>🎯 CPC: +510%</li>
+        <li>📈 Conversão: 59% vs 31%</li>
+        <li>💰 Mais acordos (+44%)</li>
+        <li>🔄 Transferência muito superior</li>
+        <li>💸 Menor custo</li>
+      </ul>
+      <p>👉 <strong>Leitura:</strong> menos volume, mais qualidade e resultado por contato.</p>
+      <p>🚀 <strong>Direção:</strong> escalar o modelo do locator dentro da operação.</p>
+    </div>
+  </aside>
+
+  <div>
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% elif comparison %}
+      <section class="panel card">
+        <h2 class="section-title">Comparativo consolidado por indicador</h2>
+        <div class="board-head">
+          <div class="hcell">{{ comparison.campaign_a }}<span class="sub">Campanha A</span></div>
+          <div class="hcell">{{ comparison.campaign_b }}<span class="sub">Campanha B</span></div>
+          <div class="hcell">Variação %<span class="sub">((A-B)/B)</span></div>
+          <div class="hcell">Diferença A - B<span class="sub">volume absoluto</span></div>
+        </div>
+
+        <div class="compare-board">
+          {% for card in comparison.cards %}
+            <div class="metric-row">
+              <div class="metric-card">
+                <div class="ico">{{ card.icon }}</div>
+                <div class="meta">
+                  <div class="label">{{ card.label }}</div>
+                  <div class="value">{{ card.a }}</div>
+                  <div class="hint">{{ comparison.campaign_a }}</div>
+                </div>
+              </div>
+
+              <div class="metric-card">
+                <div class="ico">{{ card.icon }}</div>
+                <div class="meta">
+                  <div class="label">{{ card.label }}</div>
+                  <div class="value">{{ card.b }}</div>
+                  <div class="hint">{{ comparison.campaign_b }}</div>
+                </div>
+              </div>
+
+              <div class="delta-card">
+                <div class="k">Variação %</div>
+                <div class="v status {{ card.class }}">{{ card.delta_pct }}</div>
+              </div>
+
+              <div class="delta-card">
+                <div class="k">Diferença A - B</div>
+                <div class="v status {{ card.class }}">{{ card.delta_abs }}</div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+
+        <div class="legend-mini">
+          <span><b>Leitura:</b> verde favorece o indicador.</span>
+          <span><b>Exceção:</b> Custo fica verde quando cai.</span>
+        </div>
+
+      </section>
+    {% else %}
+      <div class="error">Nenhum dado encontrado para o comparativo selecionado.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,253 @@
+
+# ===== Aba de Tabulacao =====
+TAB_COLUMN_ALIASES = {
+    'data': 'data',
+    'dt': 'data',
+    'nomecampanha': 'NomeCampanha',
+    'campanha': 'NomeCampanha',
+    'tabulacao': 'Tabulacao',
+    'tabulação': 'Tabulacao',
+    'class_loc': 'Class_Loc',
+    'classloc': 'Class_Loc',
+    'class_loca': 'Class_Loc',
+    'class_rec': 'Class_Rec',
+    'classrec': 'Class_Rec',
+    'quantidade': 'Quantidade',
+    'qtd': 'Quantidade',
+    'tma_loc': 'TMA_LOC',
+    'tmaloc': 'TMA_LOC',
+    'tma_locator': 'TMA_LOC',
+    'tma_rec': 'TMA_REC',
+    'tmarec': 'TMA_REC',
+}
+
+
+def clean_key(value: Any) -> str:
+    return str(value).strip().lower().replace(' ', '').replace('-', '').replace('_', '')
+
+
+def normalize_tabulacao_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {}
+    tempo_seen = 0
+    for col in df.columns:
+        raw = str(col).strip()
+        key = raw.lower().replace(' ', '').replace('-', '').replace('_', '')
+        key_alias = raw.strip().lower().replace(' ', '_')
+
+        if key.startswith('tempota'):
+            tempo_seen += 1
+            rename_map[col] = 'Tempo_LOC' if tempo_seen == 1 else 'Tempo_REC'
+        elif key_alias in TAB_COLUMN_ALIASES:
+            rename_map[col] = TAB_COLUMN_ALIASES[key_alias]
+        elif key in TAB_COLUMN_ALIASES:
+            rename_map[col] = TAB_COLUMN_ALIASES[key]
+        elif key.endswith('horas'):
+            digits = ''.join(ch for ch in key if ch.isdigit())
+            if digits:
+                rename_map[col] = f'{int(digits)}horas'
+    return df.rename(columns=rename_map)
+
+
+def time_to_seconds(value: Any) -> float:
+    if pd.isna(value):
+        return 0.0
+    if hasattr(value, 'hour') and hasattr(value, 'minute') and hasattr(value, 'second'):
+        return float(value.hour * 3600 + value.minute * 60 + value.second)
+    text = str(value).strip()
+    if text in {'', '--', '::', 'nan', 'NaT'}:
+        return 0.0
+    try:
+        td = pd.to_timedelta(text)
+        return float(td.total_seconds())
+    except Exception:
+        parts = text.split(':')
+        if len(parts) == 3:
+            try:
+                return float(int(parts[0]) * 3600 + int(parts[1]) * 60 + int(float(parts[2])))
+            except Exception:
+                return 0.0
+    return 0.0
+
+
+def fmt_time(seconds: float) -> str:
+    seconds = int(round(seconds or 0))
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f'{h:02d}:{m:02d}:{s:02d}'
+
+
+def weighted_tma_seconds(df: pd.DataFrame, tma_col: str = 'TMA_Seg') -> float:
+    if df.empty or 'Quantidade' not in df.columns:
+        return 0.0
+    weight = pd.to_numeric(df['Quantidade'], errors='coerce').fillna(0)
+    tma = pd.to_numeric(df[tma_col], errors='coerce').fillna(0)
+    den = float(weight.sum())
+    if den <= 0:
+        return float(tma.mean()) if len(tma) else 0.0
+    return float((tma * weight).sum() / den)
+
+
+def load_tabulacao_data() -> pd.DataFrame:
+    if not EXCEL_PATH.exists():
+        raise FileNotFoundError(f'Arquivo Excel nao encontrado em: {EXCEL_PATH}.')
+    if EXCEL_PATH.suffix.lower() not in {'.xlsx', '.xls'}:
+        raise ValueError('A aba de tabulacao precisa estar em um Excel com sheets.')
+
+    sheet_env = os.getenv('TABULACAO_SHEET', '').strip()
+    if sheet_env:
+        df = pd.read_excel(EXCEL_PATH, sheet_name=sheet_env)
+    else:
+        xls = pd.ExcelFile(EXCEL_PATH)
+        if len(xls.sheet_names) < 2:
+            raise ValueError('Crie uma segunda aba no Excel para a base de tabulacao ou defina TABULACAO_SHEET.')
+        df = pd.read_excel(EXCEL_PATH, sheet_name=xls.sheet_names[1])
+
+    df = normalize_tabulacao_columns(df)
+    required = ['data', 'NomeCampanha', 'Tabulacao', 'Quantidade']
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f'Colunas obrigatorias da aba de tabulacao ausentes: {", ".join(missing)}')
+
+    df['data'] = pd.to_datetime(df['data'], errors='coerce')
+    df = df.dropna(subset=['data']).copy()
+    df['DataStr'] = df['data'].dt.strftime('%Y-%m-%d')
+    df['NomeCampanha'] = df['NomeCampanha'].astype(str)
+    df['Tabulacao'] = df['Tabulacao'].fillna('Sem tabulacao').astype(str)
+    df['Class_Loc'] = df['Class_Loc'].fillna('Sem classificacao').astype(str) if 'Class_Loc' in df.columns else 'Sem classificacao'
+    df['Class_Rec'] = df['Class_Rec'].fillna('Sem classificacao').astype(str) if 'Class_Rec' in df.columns else 'Sem classificacao'
+    df['Quantidade'] = pd.to_numeric(df['Quantidade'], errors='coerce').fillna(0)
+
+    for col in ['TMA_LOC', 'TMA_REC', 'Tempo_LOC', 'Tempo_REC']:
+        if col not in df.columns:
+            df[col] = '00:00:00'
+        df[col + '_Seg'] = df[col].apply(time_to_seconds)
+
+    df['Tipo'] = df['NomeCampanha'].apply(lambda x: 'Locator' if 'locator' in str(x).lower() else 'Receptivo')
+    df['Classificacao'] = df.apply(lambda r: r['Class_Loc'] if r['Tipo'] == 'Locator' else r['Class_Rec'], axis=1)
+    df['TMA_Seg'] = df.apply(lambda r: r['TMA_LOC_Seg'] if r['Tipo'] == 'Locator' else r['TMA_REC_Seg'], axis=1)
+
+    hour_cols = []
+    for col in df.columns:
+        c = str(col).lower()
+        if c.endswith('horas') and ''.join(ch for ch in c if ch.isdigit()):
+            hour_cols.append(col)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    df.attrs['hour_cols'] = sorted(hour_cols, key=lambda x: int(''.join(ch for ch in str(x) if ch.isdigit())))
+    return df
+
+
+def apply_tabulacao_filters(df: pd.DataFrame, tipo: str, campaign: str, date: str) -> pd.DataFrame:
+    out = df.copy()
+    if tipo != 'Todos':
+        out = out[out['Tipo'] == tipo]
+    if campaign != 'Todos':
+        out = out[out['NomeCampanha'] == campaign]
+    if date != 'Todos':
+        out = out[out['DataStr'] == date]
+    return out
+
+
+def tab_group_payload(df: pd.DataFrame, tipo: str, top_n: int = 12) -> Dict[str, Any]:
+    part = df[df['Tipo'] == tipo].copy()
+    if part.empty:
+        return {'labels': [], 'volume': [], 'tma': []}
+    grouped = part.groupby('Tabulacao', as_index=False).apply(
+        lambda g: pd.Series({'Quantidade': g['Quantidade'].sum(), 'TMA_Seg': weighted_tma_seconds(g)})
+    ).reset_index(drop=True)
+    grouped = grouped.sort_values('Quantidade', ascending=False).head(top_n)
+    return {
+        'labels': grouped['Tabulacao'].tolist(),
+        'volume': grouped['Quantidade'].round(0).astype(int).tolist(),
+        'tma': grouped['TMA_Seg'].round(0).astype(int).tolist(),
+        'tma_fmt': [fmt_time(v) for v in grouped['TMA_Seg'].tolist()],
+    }
+
+
+def class_payload(df: pd.DataFrame) -> Dict[str, Any]:
+    rows = []
+    labels = sorted([x for x in df['Classificacao'].dropna().unique().tolist() if str(x).strip()])
+    for cls in labels:
+        loc = df[(df['Tipo'] == 'Locator') & (df['Classificacao'] == cls)]
+        rec = df[(df['Tipo'] == 'Receptivo') & (df['Classificacao'] == cls)]
+        rows.append({
+            'Classificacao': cls,
+            'Volume Locator': fmt_int(loc['Quantidade'].sum()),
+            'TMA Locator': fmt_time(weighted_tma_seconds(loc)),
+            'Volume Receptivo': fmt_int(rec['Quantidade'].sum()),
+            'TMA Receptivo': fmt_time(weighted_tma_seconds(rec)),
+            'loc_tma_sec': int(round(weighted_tma_seconds(loc))),
+            'rec_tma_sec': int(round(weighted_tma_seconds(rec))),
+        })
+    rows = sorted(rows, key=lambda r: (r['loc_tma_sec'] + r['rec_tma_sec']), reverse=True)
+    return {
+        'labels': [r['Classificacao'] for r in rows],
+        'locator_tma': [r['loc_tma_sec'] for r in rows],
+        'receptivo_tma': [r['rec_tma_sec'] for r in rows],
+        'rows': rows,
+    }
+
+
+def summarize_tabulacao(df: pd.DataFrame) -> Dict[str, Any]:
+    loc = df[df['Tipo'] == 'Locator']
+    rec = df[df['Tipo'] == 'Receptivo']
+    total_qtd = float(df['Quantidade'].sum())
+    cards = [
+        {'label': 'Volume Locator', 'icon': '🤖', 'value': fmt_int(loc['Quantidade'].sum()), 'hint': fmt_pct(safe_pct(loc['Quantidade'].sum(), total_qtd))},
+        {'label': 'TMA Locator', 'icon': '⏱️', 'value': fmt_time(weighted_tma_seconds(loc)), 'hint': 'TMA ponderado'},
+        {'label': 'Volume Receptivo', 'icon': '👤', 'value': fmt_int(rec['Quantidade'].sum()), 'hint': fmt_pct(safe_pct(rec['Quantidade'].sum(), total_qtd))},
+        {'label': 'TMA Receptivo', 'icon': '🎧', 'value': fmt_time(weighted_tma_seconds(rec)), 'hint': 'TMA ponderado'},
+    ]
+
+    ranking = df.groupby(['Tipo', 'Tabulacao', 'Classificacao'], as_index=False).apply(
+        lambda g: pd.Series({'Quantidade': g['Quantidade'].sum(), 'TMA_Seg': weighted_tma_seconds(g)})
+    ).reset_index(drop=True).sort_values('Quantidade', ascending=False).head(20)
+    ranking_rows = [{
+        'Tipo': r['Tipo'],
+        'Tabulacao': r['Tabulacao'],
+        'Classificacao': r['Classificacao'],
+        'Quantidade': fmt_int(r['Quantidade']),
+        'TMA': fmt_time(r['TMA_Seg']),
+    } for _, r in ranking.iterrows()]
+
+    classes = class_payload(df)
+    return {
+        'cards': cards,
+        'locator': tab_group_payload(df, 'Locator'),
+        'receptivo': tab_group_payload(df, 'Receptivo'),
+        'classes': classes,
+        'ranking_rows': ranking_rows,
+    }
+
+
+@app.route('/tabulacao')
+def tabulacao() -> str:
+    error = None
+    context: Dict[str, Any] = {
+        'page': 'tabulacao',
+        'campaigns': [],
+        'dates': [],
+        'selected_tipo': 'Todos',
+        'selected_campaign': 'Todos',
+        'selected_date': 'Todos',
+        'summary': None,
+    }
+    try:
+        df = load_tabulacao_data()
+        campaigns = sorted(df['NomeCampanha'].dropna().unique().tolist())
+        dates = sorted(df['DataStr'].dropna().unique().tolist(), reverse=True)
+        selected_tipo = request.args.get('tipo', 'Todos')
+        selected_campaign = request.args.get('campaign', 'Todos')
+        selected_date = request.args.get('date', 'Todos')
+        filtered = apply_tabulacao_filters(df, selected_tipo, selected_campaign, selected_date)
+        context.update({
+            'campaigns': campaigns,
+            'dates': dates,
+            'selected_tipo': selected_tipo,
+            'selected_campaign': selected_campaign,
+            'selected_date': selected_date,
+            'summary': summarize_tabulacao(filtered) if not filtered.empty else None,
+        })
+    except Exception as exc:
+        error = str(exc)
+    return render_template('tabulacao.html', error=error, **context)
